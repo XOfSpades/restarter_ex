@@ -9,17 +9,22 @@ defmodule RestarterEx do
     backoff: %RestarterEx.Backoff{}
   }
 
-  def restarted(child_spec) do
+  def restarted(child_spec, id \\ __MODULE__) do
     %{
+      id: id,
       restart: :permanent,
       shutdown: 6000,
       start: {
         __MODULE__,
         :start_link,
-        child_spec
+        [[child_spec: child_spec]]
       },
       type: :worker
     }
+  end
+
+  def start(params, opts \\ []) do
+    GenServer.start(__MODULE__, params, opts)
   end
 
   def start_link(params, opts \\ []) do
@@ -30,6 +35,7 @@ defmodule RestarterEx do
     state = Map.merge(@defaults, Keyword.get(options, :child_spec))
     %{start: {child_module, function_call, opts}, id: module_id} = state
 
+    Logger.debug("Start child:")
     start_child({child_module, function_call, opts}, module_id)
 
     {:ok, state}
@@ -55,20 +61,20 @@ defmodule RestarterEx do
     {:noreply, state}
   end
 
-  def handle_child_down(_, start_config, id, :permanent) do
+  defp handle_child_down(_, start_config, id, :permanent) do
     start_child(start_config, id)
   end
 
-  def handle_child_down(_, _, :temporary) do
+  defp handle_child_down(_, _, :temporary) do
     :ok
   end
 
-  def handle_child_down(reason, _, :transient)
+  defp handle_child_down(reason, _, _, :transient)
       when reason == :normal or reason == :shutdown do
     :ok
   end
 
-  def handle_child_down(_, start_config, id, :transient) do
+  defp handle_child_down(_, start_config, id, :transient) do
     start_child(start_config, id)
   end
 
@@ -78,20 +84,25 @@ defmodule RestarterEx do
         "options #{inspect(opts)}"
     )
 
-    case apply(child_module, function_call, opts) do
-      {:ok, pid} ->
-        Process.monitor(pid)
+    try do
+      case apply(child_module, function_call, opts) do
+        {:ok, pid} ->
+          Process.unlink(pid)
+          IO.puts "\n\nProcess pid: #{inspect pid} is alive? #{Process.alive?(pid)}; new id: #{id}"
+          Process.monitor(pid)
+          IO.puts("Alive? #{Process.alive?(pid)}")
 
-        if(
-          is_atom(id) && id != nil && id != false && id != true &&
-            id != :undefined
-        ) do
-          Process.register(pid, id)
-        end
+          :ok
 
-        :ok
-
-      _ ->
+        _ ->
+          send(self(), {:DOWN, nil, :process, nil, :start_failed})
+      end
+    rescue
+      err ->
+        Logger.error(
+          "Exception was raised while starting child " <>
+          "process: #{inspect err}. Try to restart."
+        )
         send(self(), {:DOWN, nil, :process, nil, :start_failed})
     end
   end
