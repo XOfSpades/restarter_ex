@@ -1,27 +1,15 @@
 defmodule RestarterEx do
+  alias RestarterEx.{Backoff, BackoffState}
   require Logger
   use GenServer
 
-  @defaults %{
+  @defaults [
     restart: :permanent,
     shutdown: 5000,
     type: :worker,
-    backoff: %RestarterEx.Backoff{}
-  }
-
-  def restarted(child_spec, id \\ __MODULE__) do
-    %{
-      id: id,
-      restart: :permanent,
-      shutdown: 6000,
-      start: {
-        __MODULE__,
-        :start_link,
-        [[child_spec: child_spec]]
-      },
-      type: :worker
-    }
-  end
+    backoff: %Backoff{},
+    backoff_state: %BackoffState{}
+  ]
 
   def start(params, opts \\ []) do
     GenServer.start(__MODULE__, params, opts)
@@ -31,79 +19,95 @@ defmodule RestarterEx do
     GenServer.start_link(__MODULE__, params, opts)
   end
 
-  def init(options) do
-    state = Map.merge(@defaults, Keyword.get(options, :child_spec))
-    %{start: {child_module, function_call, opts}, id: module_id} = state
+  def init(params) do
+    Process.flag(:trap_exit, true)
 
-    Logger.debug("Start child:")
-    start_child({child_module, function_call, opts}, module_id)
+    state = Keyword.merge(@defaults, params)
+    child_spec = Keyword.get(state, :child_spec)
+
+    Logger.debug("Start child with spec: #{}")
+    start_child({_child_module, _start_func, _opts} = child_spec)
 
     {:ok, state}
   end
 
-  def handle_info({:DOWN, _reference, :process, pid, reason}, state) do
-    Logger.warn(
-      "RestarterEx receiced down message with reason #{reason}. " <>
+  def handle_info({:EXIT, pid, reason}, state) do
+    Logger.error(
+      "RestarterEx receiced exit message with reason #{reason}. " <>
         "Child pid: #{inspect(pid)}."
     )
 
-    restart_config = Map.get(state, :restart)
-    {child_module, start_call, opts} = Map.get(state, :start)
-    id = Map.get(state, :id, child_module)
+    restart_config = Keyword.get(state, :restart)
+    {child_module, start_call, opts} = Keyword.get(state, :child_spec)
+    id = Keyword.get(state, :id, child_module)
+
+    backoff = Keyword.get(state, :backoff)
+    backoff_state = Keyword.get(state, :backoff_state)
 
     handle_child_down(
       reason,
       {child_module, start_call, opts},
-      id,
-      restart_config
+      restart_config,
+      backoff_state
     )
 
+    new_state = Keyword.put(
+      state,
+      :backoff_state,
+      BackoffState.next(backoff_state, backoff)
+    )
+
+    {:noreply, new_state}
+  end
+
+  def handle_info({:start_child, config}, state) do
+    start_child(config)
     {:noreply, state}
   end
 
-  defp handle_child_down(_, start_config, id, :permanent) do
-    start_child(start_config, id)
+  defp handle_child_down(_, start_config, :permanent, backoff_state) do
+    trigger_start_child(start_config, backoff_state)
   end
 
-  defp handle_child_down(_, _, :temporary) do
+  defp handle_child_down(_, _, :temporary, _) do
     :ok
   end
 
-  defp handle_child_down(reason, _, _, :transient)
-      when reason == :normal or reason == :shutdown do
+  defp handle_child_down(reason, _, :transient, _)
+       when reason == :normal or reason == :shutdown do
     :ok
   end
 
-  defp handle_child_down(_, start_config, id, :transient) do
-    start_child(start_config, id)
+  defp handle_child_down(_, start_config, :transient, backoff_state) do
+    trigger_start_child(start_config, backoff_state)
   end
 
-  defp start_child({child_module, function_call, opts}, id) do
-    Logger.info(
-      "Start child #{child_module} with function #{function_call} and " <>
-        "options #{inspect(opts)}"
-    )
+  defp start_child({child_module, function_call, opts}) do
+    case apply(child_module, function_call, opts) do
+      {:ok, pid} ->
+        Process.link(pid)
 
-    try do
-      case apply(child_module, function_call, opts) do
-        {:ok, pid} ->
-          Process.unlink(pid)
-          IO.puts "\n\nProcess pid: #{inspect pid} is alive? #{Process.alive?(pid)}; new id: #{id}"
-          Process.monitor(pid)
-          IO.puts("Alive? #{Process.alive?(pid)}")
-
-          :ok
-
-        _ ->
-          send(self(), {:DOWN, nil, :process, nil, :start_failed})
-      end
-    rescue
-      err ->
-        Logger.error(
-          "Exception was raised while starting child " <>
-          "process: #{inspect err}. Try to restart."
+        Logger.debug(
+          "Started child with config " <>
+            "#{inspect({child_module, function_call, opts})}; " <>
+            "Pid: #{inspect(pid)}"
         )
-        send(self(), {:DOWN, nil, :process, nil, :start_failed})
+
+      {:error, {:already_started, pid}} ->
+        Process.link(pid)
+
+        Logger.warn(
+          "Tried to start a process which was already alive. " <>
+            "Pid: #{inspect(pid)}. " <>
+            "Config: #{inspect({child_module, function_call, opts})}."
+        )
+
+      _ ->
+        send(self(), {:EXIT, nil, :start_failed})
     end
+  end
+
+  defp trigger_start_child(config, %{duration: duration} = %BackoffState{}) do
+    Process.send_after(self(), {:start_child, config}, duration)
   end
 end

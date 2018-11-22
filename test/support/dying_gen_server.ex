@@ -13,6 +13,7 @@ defmodule RestarterEx.Support.DyingGenServer do
 
   def start(_, opts \\ [name: __MODULE__]) do
     Logger.info("start DyingGenServer")
+
     GenServer.start(
       __MODULE__,
       [],
@@ -21,7 +22,7 @@ defmodule RestarterEx.Support.DyingGenServer do
   end
 
   def start_link(_, opts \\ [name: __MODULE__]) do
-    Logger.info("start_link DyingGenServer")
+    #    Logger.info("start_link DyingGenServer")
     GenServer.start_link(
       __MODULE__,
       [],
