@@ -51,11 +51,19 @@ defmodule RestarterEx do
       backoff_state
     )
 
-    new_state = Keyword.put(
-      state,
-      :backoff_state,
-      BackoffState.next(backoff_state, backoff)
-    )
+    new_state = if BackoffState.reset_state?(backoff_state) do
+      Keyword.put(
+        state,
+        :backoff_state,
+        BackoffState.reset_state(backoff_state)
+      )
+    else
+      Keyword.put(
+        state,
+        :backoff_state,
+        BackoffState.next(backoff_state, backoff)
+      )
+    end
 
     {:noreply, new_state}
   end
