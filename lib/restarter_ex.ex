@@ -33,7 +33,7 @@ defmodule RestarterEx do
 
   def handle_info({:EXIT, pid, reason}, state) do
     Logger.error(
-      "RestarterEx receiced exit message with reason #{reason}. " <>
+      "RestarterEx receiced exit message with reason #{inspect(reason)}. " <>
         "Child pid: #{inspect(pid)}."
     )
 
