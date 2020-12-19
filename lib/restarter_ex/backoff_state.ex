@@ -13,7 +13,7 @@ defmodule RestarterEx.BackoffState do
 
     time_border =
       NaiveDateTime.utc_now()
-      |> NaiveDateTime.add(seconds_before, :seconds)
+      |> NaiveDateTime.add(seconds_before, :second)
 
     NaiveDateTime.compare(last_time, time_border) == :lt
   end
