@@ -8,8 +8,8 @@ defmodule RestarterEx.MixProject do
       elixir: ">= 1.5.0",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
-      description: description,
-      package: package,
+      description: description(),
+      package: package(),
       deps: deps()
     ]
   end
@@ -42,6 +42,6 @@ defmodule RestarterEx.MixProject do
 
   # Run "mix help deps" to learn about dependencies.
   defp deps do
-    []
+    [{:ex_doc, ">= 0.0.0", only: :dev, runtime: false}]
   end
 end
