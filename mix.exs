@@ -4,7 +4,7 @@ defmodule RestarterEx.MixProject do
   def project do
     [
       app: :restarter_ex,
-      version: "0.1.1",
+      version: "0.1.3",
       elixir: ">= 1.5.0",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
